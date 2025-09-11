@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Canteen Preorder — All Features Demo</title>
+
+  <!-- TailwindCSS (CDN for demo) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- React + ReactDOM UMD -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- QR code generator (qrcodejs) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <!-- HTML5 QR CODE SCANNER -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.7/minified/html5-qrcode.min.js"></script>
+
+  <style>
+    body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    .qr-scanner-modal { max-width: 520px; width: 96%; }
+  </style>
+</head>
+<body class="bg-orange-50 min-h-screen">
+  <div id="root" class="p-4"></div>
+
+  <script type="text/babel">
+  const { useState, useEffect, useRef } = React;
+
+  // ===== Helper utilities =====
+  const LS_MENU = "canteen_menu_v3";
+  const LS_ORDERS = "canteen_orders_v3";
+  const LS_ADMIN_PASS = "canteen_admin_pass_v3";
+
+  function uid(prefix = "") {
+    return prefix + Math.random().toString(36).slice(2, 9);
+  }
+
+  function nowHuman() {
+    return new Date().toLocaleString();
+  }
+
+  // ===== DEFAULT MENU =====
+  const DEFAULT_MENU = [
+    { id: "m1", name: "Veg Thali", price: 60, desc: "Rice, sabzi, dal, chapati", image: "", stock: 10 },
+    { id: "m2", name: "Chicken Biryani", price: 120, desc: "Spiced rice with chicken", image: "", stock: 8 },
+    { id: "m3", name: "Veg Sandwich", price: 40, desc: "Veggie sandwich with chutney", image: "", stock: 15 },
+    { id: "m4", name: "Coffee", price: 15, desc: "Hot filter coffee", image: "", stock: 25 },
+  ];
+
+  // ===== QR helpers =====
+  function renderQRCode(targetEl, text, size = 120) {
+    if (!targetEl) return;
+    targetEl.innerHTML = "";
+    new QRCode(targetEl, { text: String(text), width: size, height: size });
+  }
+
+  // ===== MAIN APP =====
+  function App() {
+    // load persisted menu/orders/adminPass
+    const [menu, setMenu] = useState(() => {
+      try { return JSON.parse(localStorage.getItem(LS_MENU)) || DEFAULT_MENU; } catch (e) { return DEFAULT_MENU; }
+    });
+    const [orders, setOrders] = useState(() => {
+      try { return JSON.parse(localStorage.getItem(LS_ORDERS)) || []; } catch (e) { return []; }
+    });
+    const [adminPass, setAdminPass] = useState(() => {
+      return localStorage.getItem(LS_ADMIN_PASS) || "1234";
+    });
+
+    // app UI state
+    const [page, setPage] = useState("home"); // home, menu
+    const [studentName, setStudentName] = useState("");
+    const [cart, setCart] = useState([]);
+    const [message, setMessage] = useState("");
+
+    // admin state
+    const [adminModeVisible, setAdminModeVisible] = useState(false); // small admin button visibility on menu page
+    const [adminAuth, setAdminAuth] = useState(false);
+    const [adminInput, setAdminInput] = useState("");
+    const [adminNewPass, setAdminNewPass] = useState("");
+
+    // admin menu form
+    const [editingId, setEditingId] = useState(null);
+    const [menuForm, setMenuForm] = useState({ name: "", price: "", desc: "", stock: "", image: "" });
+    const fileRef = useRef(null);
+
+    // scanner
+    const [scannerOpen, setScannerOpen] = useState(false);
+    const scannerRef = useRef(null);
+    const scannerInstanceRef = useRef(null);
+
+    // persist menu/orders/adminPass
+    useEffect(() => { localStorage.setItem(LS_MENU, JSON.stringify(menu)); }, [menu]);
+    useEffect(() => { localStorage.setItem(LS_ORDERS, JSON.stringify(orders)); }, [orders]);
+    useEffect(() => { localStorage.setItem(LS_ADMIN_PASS, adminPass); }, [adminPass]);
+
+    // ===== Cart & ordering logic =====
+    function addToCart(item) {
+      if (item.stock <= 0) { setMessage(item.name + " is out of stock"); setTimeout(()=>setMessage(""),3000); return; }
+      const ex = cart.find(c => c.id === item.id);
+      if (ex) setCart(cart.map(c => c.id === item.id ? { ...c, qty: c.qty + 1 } : c));
+      else setCart([...cart, { ...item, qty: 1 }]);
+    }
+    function changeQty(id, delta) {
+      setCart(prev => prev.map(c => c.id === id ? { ...c, qty: Math.max(0, c.qty + delta) } : c).filter(c => c.qty > 0));
+    }
+    function cartTotal() { return cart.reduce((s,c)=>s + (Number(c.price)||0)*c.qty, 0); }
+
+    function generatePickupCode() {
+      let code;
+      const used = new Set(orders.map(o => o.pickupCode).filter(Boolean));
+      do { code = Math.floor(100000 + Math.random()*900000).toString(); } while (used.has(code));
+      return code;
+    }
+
+    // Place order: paymentMethod = 'online' or 'cash'
+    function placeOrder(paymentMethod) {
+      if (!studentName.trim()) { setMessage("Enter your name"); return; }
+      if (cart.length === 0) { setMessage("Cart is empty"); return; }
+      // check stock available for each item
+      for (let c of cart) {
+        const menuItem = menu.find(m => m.id === c.id);
+        if (!menuItem || (menuItem.stock < c.qty)) {
+          setMessage(`Not enough stock for ${c.name}`);
+          return;
+        }
+      }
+
+      const id = uid("ORD-");
+      const createdAt = new Date().toISOString();
+      const total = cartTotal();
+      const order = {
+        id, student: studentName, items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, qty: c.qty })),
+        total, paymentMethod, paid: paymentMethod === "online", approved: paymentMethod === "online", served: false,
+        pickupCode: paymentMethod === "online" ? generatePickupCode() : null,
+        createdAt
+      };
+
+      setOrders(prev => [order, ...prev]);
+
+      // If paymentMethod === 'online', immediately reduce stock
+      if (paymentMethod === "online") {
+        setMenu(prev => prev.map(m => {
+          const ordered = cart.find(c => c.id === m.id);
+          if (!ordered) return m;
+          return { ...m, stock: m.stock - ordered.qty };
+        }));
+      }
+
+      setCart([]);
+      setMessage(paymentMethod === "online" ? `Order placed (online). Pickup code shown in My Orders.` : `Order placed (cash). Pending admin approval.`);
+      setTimeout(()=>setMessage(""),4000);
+    }
+
+    // Admin approves cash order: set approved true, generate pickupCode, reduce stock
+    function approveOrder(orderId) {
+      const ord = orders.find(o => o.id === orderId);
+      if (!ord) return;
+      // check stock again
+      for (let it of ord.items) {
+        const menuItem = menu.find(m => m.id === it.id);
+        if (!menuItem || menuItem.stock < it.qty) { alert(`Not enough stock to approve for ${it.name}`); return; }
+      }
+      // reduce stock
+      setMenu(prev => prev.map(m => {
+        const ordered = ord.items.find(i => i.id === m.id);
+        if (!ordered) return m;
+        return { ...m, stock: m.stock - ordered.qty };
+      }));
+      // set approved and generate code
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, approved: true, pickupCode: generatePickupCode() } : o));
+    }
+
+    function markServedByCode(code) {
+      const ord = orders.find(o => o.pickupCode === code);
+      if (!ord) { alert("No order found for code " + code); return; }
+      if (ord.served) { alert("Order already served"); return; }
+      setOrders(prev => prev.map(o => o.id === ord.id ? { ...o, served: true } : o));
+      alert(`Order ${ord.id} served for ${ord.student}`);
+    }
+
+    // Admin: change password
+    function changeAdminPassword(newPass) {
+      if (!newPass || newPass.length < 3) { alert("Password must be >= 3 chars"); return; }
+      setAdminPass(newPass);
+      setAdminNewPass("");
+      alert("Admin password changed");
+    }
+
+    // Admin: add/edit/delete menu items; image upload base64
+    function handleMenuImageFile(e) {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = ev => setMenuForm(prev => ({ ...prev, image: ev.target.result }));
+      reader.readAsDataURL(f);
+    }
+
+    function saveMenuItem() {
+      if (!menuForm.name || !menuForm.price) { alert("Name & price required"); return; }
+      if (editingId) {
+        setMenu(prev => prev.map(m => m.id === editingId ? { ...m, name: menuForm.name, price: Number(menuForm.price), desc: menuForm.desc, image: menuForm.image, stock: Number(menuForm.stock||0) } : m));
+        setEditingId(null);
+      } else {
+        setMenu(prev => [...prev, { id: uid("m"), name: menuForm.name, price: Number(menuForm.price), desc: menuForm.desc, image: menuForm.image, stock: Number(menuForm.stock||0) }]);
+      }
+      setMenuForm({ name: "", price: "", desc: "", image: "", stock: "" });
+      if (fileRef.current) fileRef.current.value = null;
+    }
+
+    function editMenu(m) {
+      setEditingId(m.id);
+      setMenuForm({ name: m.name, price: m.price, desc: m.desc, image: m.image, stock: m.stock });
+    }
+    function deleteMenu(id) {
+      if (!confirm("Delete item?")) return;
+      setMenu(prev => prev.filter(m => m.id !== id));
+    }
+
+    // stats
+    function stats() {
+      const totalSold = orders.reduce((sum,o) => sum + (o.approved || o.paymentMethod === "online" ? o.items.reduce((s,i)=>s+i.qty,0) : 0), 0);
+      const pending = orders.filter(o => (o.paymentMethod === "cash" && !o.approved)).length;
+      const completed = orders.filter(o => o.served).length;
+      return { totalSold, pending, completed };
+    }
+
+    // scanner open/close (html5-qrcode)
+    useEffect(() => {
+      if (scannerOpen) {
+        const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+        const html5Qr = new Html5Qrcode("qr-reader");
+        scannerInstanceRef.current = html5Qr;
+        html5Qr.start({ facingMode: "environment" }, config,
+          (decoded) => {
+            // decoded text -> try mark served
+            // html5-qrcode returns decoded text string
+            setScannerOpen(false);
+            try { html5Qr.stop(); } catch(e){}
+            markServedByCode(decoded);
+          },
+          (err) => {
+            // scan error or decode failure — ignore
+          }).catch(err => {
+            alert("Camera error: " + err);
+            setScannerOpen(false);
+          });
+      } else {
+        if (scannerInstanceRef.current) {
+          try { scannerInstanceRef.current.stop(); } catch(e){}
+          scannerInstanceRef.current = null;
+        }
+      }
+      return () => {
+        if (scannerInstanceRef.current) {
+          try { scannerInstanceRef.current.stop(); } catch(e){}
+          scannerInstanceRef.current = null;
+        }
+      };
+    }, [scannerOpen]);
+
+    // ===== Render UI =====
+    const s = stats();
+    return (
+      <div className="max-w-6xl mx-auto">
+        {/* HEADER */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-extrabold text-orange-700">CANTEEN PREORDER</h1>
+            <div className="text-sm text-gray-600">Welcome! Today: {new Date().toLocaleDateString()}</div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-sm text-gray-700">Page: <strong>{page === "home" ? "Home" : "Menu"}</strong></div>
+            <div className="text-sm text-gray-700">Stats: Sold <strong>{s.totalSold}</strong> • Pending <strong>{s.pending}</strong> • Served <strong>{s.completed}</strong></div>
+            <div>
+              {page === "home" ? (
+                <button onClick={() => setPage("menu")} className="px-3 py-1 bg-orange-500 text-white rounded">Go to Menu</button>
+              ) : (
+                <button onClick={() => setPage("home")} className="px-3 py-1 border rounded">Home</button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* MAIN PAGE */}
+        {page === "home" && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h2 className="text-xl font-bold mb-2">Welcome Students</h2>
+              <p className="text-gray-600 mb-4">Order your canteen food in advance to skip the queue.</p>
+              <p className="mb-4">Click <strong>Go to Menu</strong> to browse and place orders.</p>
+              <div>
+                <label className="block text-sm mb-1">Enter your name (for My Orders):</label>
+                <input value={studentName} onChange={e=>setStudentName(e.target.value)} className="border p-2 rounded w-full" placeholder="Your name" />
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h2 className="text-xl font-bold mb-2">How it works</h2>
+              <ul className="list-disc pl-5 text-gray-700">
+                <li>Choose items and add to cart.</li>
+                <li>Select <strong>Online</strong> to simulate payment — pickup code & QR generated immediately.</li>
+                <li>Select <strong>Cash</strong> — order will be in Pending Approval; admin approves and then code & QR generated.</li>
+                <li>Admin can scan QR or enter code to mark order served.</li>
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {/* MENU PAGE */}
+        {page === "menu" && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* LEFT: Menu list */}
+            <div className="lg:col-span-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {menu.map(item => (
+                  <div key={item.id} className="bg-white p-4 rounded shadow flex gap-4">
+                    <div className="w-24 h-24 bg-gray-100 rounded overflow-hidden flex-shrink-0 flex items-center justify-center">
+                      {item.image ? <img src={item.image} alt={item.name} className="w-full h-full object-cover" /> : <div className="text-gray-400">No image</div>}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <h3 className="font-semibold">{item.name}</h3>
+                          <div className="text-xs text-gray-600">{item.desc}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-semibold">₹{item.price}</div>
+                          <div className={`text-sm ${item.stock>5 ? 'text-green-600' : item.stock>0 ? 'text-yellow-600' : 'text-red-600'}`}>Stock: {item.stock}</div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex items-center gap-2">
+                        <button disabled={item.stock<=0} onClick={()=>addToCart(item)} className={`px-3 py-1 rounded ${item.stock>0 ? 'bg-orange-500 text-white' : 'bg-gray-300'}`}>Add</button>
+                        <div className="text-sm text-gray-600">ID: {item.id}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Cart + Place Order */}
+              <div className="bg-white p-4 rounded shadow mt-6">
+                <h3 className="font-bold">Cart</h3>
+                {cart.length === 0 ? <div className="text-sm text-gray-500">Cart is empty</div> : (
+                  <div>
+                    {cart.map(c=>(
+                      <div key={c.id} className="flex justify-between items-center border-b py-2">
+                        <div><strong>{c.name}</strong> x {c.qty}</div>
+                        <div className="flex items-center gap-2">
+                          <button onClick={()=>changeQty(c.id,-1)} className="px-2 border rounded">-</button>
+                          <button onClick={()=>changeQty(c.id,1)} className="px-2 border rounded">+</button>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="mt-3">Total: <strong>₹{cartTotal()}</strong></div>
+                    <div className="mt-3 flex gap-2">
+                      <button onClick={()=>placeOrder('online')} className="px-3 py-1 bg-green-600 text-white rounded">Pay Online</button>
+                      <button onClick={()=>placeOrder('cash')} className="px-3 py-1 border rounded">Pay Cash (Pending)</button>
+                    </div>
+                  </div>
+                )}
+                {message && <div className="mt-2 text-red-600">{message}</div>}
+              </div>
+
+              {/* My Orders */}
+              <div className="bg-white p-4 rounded shadow mt-6">
+                <h3 className="font-bold">My Orders</h3>
+                {studentName.trim()==="" && <div className="text-sm text-gray-500">Enter your name on Home to see your orders here.</div>}
+                {orders.filter(o => o.student === studentName).length === 0 && studentName.trim()!=="" && <div className="text-sm text-gray-500">No orders.</div>}
+                {orders.filter(o => o.student === studentName).map(o=>(
+                  <div key={o.id} className="border p-3 rounded mb-2">
+                    <div className="flex justify-between">
+                      <div><strong>{o.id}</strong> • {new Date(o.createdAt).toLocaleString()}</div>
+                      <div className="text-sm">{o.paymentMethod.toUpperCase()}</div>
+                    </div>
+                    <div className="mt-2 text-sm">Items: {o.items.map(i=>`${i.name} x${i.qty}`).join(", ")}</div>
+                    <div className="mt-2 text-sm">Total: ₹{o.total}</div>
+                    <div className="mt-2 flex items-center gap-3">
+                      <div>
+                        {o.approved || o.paymentMethod === 'online' ? (
+                          <>
+                            <div className="text-sm">Pickup Code: <strong>{o.pickupCode}</strong></div>
+                            <div ref={el => o.qrTarget = el} className="mt-1"></div>
+                          </>
+                        ) : (
+                          <div className="text-sm text-yellow-600">Awaiting admin approval (cash)</div>
+                        )}
+                      </div>
+                      <div className="ml-auto text-sm">{o.served ? <span className="text-green-600">✅ Served</span> : <span className="text-yellow-600">Pending</span>}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* RIGHT: Admin small button + admin quick controls + orders */}
+            <div className="space-y-4">
+              {/* small admin button (bottom corner style) */}
+              <div className="fixed right-6 bottom-6">
+                <button onClick={()=>setAdminModeVisible(true)} className="px-3 py-2 bg-gray-900 text-white rounded-full shadow-lg">Admin</button>
+              </div>
+
+              {/* Admin panel (expanded when adminModeVisible clicked) */}
+              {adminModeVisible && (
+                <div className="bg-white p-4 rounded shadow">
+                  {!adminAuth ? (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-bold">Admin Login</h3>
+                        <button onClick={()=>setAdminModeVisible(false)} className="text-sm text-gray-500">Close</button>
+                      </div>
+                      <input type="password" placeholder="Password" value={adminInput} onChange={e=>setAdminInput(e.target.value)} className="w-full border p-2 rounded mt-2"/>
+                      <div className="flex gap-2 mt-2">
+                        <button onClick={()=>{ if(adminInput===adminPass) { setAdminAuth(true); setAdminInput(''); } else alert('Wrong password'); }} className="px-3 py-1 bg-orange-600 text-white rounded">Login</button>
+                        <button onClick={()=>{ setAdminModeVisible(false); setAdminInput(''); }} className="px-3 py-1 border rounded">Close</button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-bold">Admin Dashboard</h3>
+                        <div className="flex gap-2">
+                          <button onClick={()=>{ setAdminAuth(false); setAdminModeVisible(false); }} className="px-2 py-1 border rounded">Logout</button>
+                        </div>
+                      </div>
+
+                      {/* Quick stats */}
+                      <div className="mt-3 text-sm">
+                        <div>Total items sold: <strong>{s.totalSold}</strong></div>
+                        <div>Pending approvals: <strong>{s.pending}</strong></div>
+                        <div>Completed (served): <strong>{s.completed}</strong></div>
+                      </div>
+
+                      {/* Orders quick list */}
+                      <div className="mt-3">
+                        <h4 className="font-semibold">Recent Orders</h4>
+                        <div className="max-h-48 overflow-auto mt-2 space-y-2">
+                          {orders.map(o=>(
+                            <div key={o.id} className="border p-2 rounded">
+                              <div className="flex justify-between">
+                                <div><strong>{o.id}</strong> • {o.student}</div>
+                                <div className="text-sm">{o.paymentMethod.toUpperCase()}</div>
+                              </div>
+                              <div className="mt-1 text-xs">Items: {o.items.map(i=>i.name+" x"+i.qty).join(", ")}</div>
+                              <div className="mt-1 text-xs">Status: {o.served? "Served" : o.approved ? "Approved" : (o.paymentMethod==='cash' ? "Pending Approval" : "Paid/Online")}</div>
+                              <div className="mt-2 flex gap-2">
+                                {!o.approved && o.paymentMethod === 'cash' && <button onClick={()=>approveOrder(o.id)} className="px-2 py-1 bg-green-600 text-white rounded text-sm">Approve Cash</button>}
+                                {!o.served && (o.approved || o.paymentMethod==='online') && <button onClick={()=>markServedByCode(o.pickupCode)} className="px-2 py-1 bg-blue-600 text-white rounded text-sm">Mark Served</button>}
+                                <button onClick={()=>{ window.open('', '_blank'); }} className="px-2 py-1 border rounded text-sm">Details</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Admin settings: change password */}
+                      <div className="mt-3 border-t pt-3">
+                        <h4 className="font-semibold">Settings</h4>
+                        <div className="mt-2">
+                          <input type="password" placeholder="New admin password" value={adminNewPass} onChange={e=>setAdminNewPass(e.target.value)} className="border p-2 rounded w-full"/>
+                          <button onClick={()=>{ if(!adminNewPass) return alert('enter'); setAdminPass(adminNewPass); setAdminNewPass(''); alert('Password changed'); }} className="mt-2 px-3 py-1 bg-yellow-500 rounded">Change Password</button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Admin full panel (separate large admin view) */}
+              {adminAuth && (
+                <div className="bg-white p-4 rounded shadow">
+                  <h3 className="font-bold">Full Admin Panel</h3>
+
+                  {/* Menu management */}
+                  <div className="mt-3">
+                    <h4 className="font-semibold">Manage Menu</h4>
+                    <div className="grid grid-cols-1 gap-2 mt-2">
+                      {menu.map(m => (
+                        <div key={m.id} className="flex justify-between items-center border p-2 rounded">
+                          <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 bg-gray-100 rounded overflow-hidden">
+                              {m.image ? <img src={m.image} alt="" className="w-full h-full object-cover" /> : <div className="text-xs text-gray-400 p-2">No image</div>}
+                            </div>
+                            <div>
+                              <div className="font-medium">{m.name}</div>
+                              <div className="text-xs text-gray-600">₹{m.price} • Stock: {m.stock}</div>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button onClick={()=>editMenu(m)} className="px-2 py-1 border rounded text-sm">Edit</button>
+                            <button onClick={()=>deleteMenu(m.id)} className="px-2 py-1 border rounded text-sm text-red-600">Delete</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Add/Edit form */}
+                    <div className="mt-3 border p-3 rounded">
+                      <h5 className="font-semibold">{editingId ? "Edit Item" : "Add Item"}</h5>
+                      <div className="grid grid-cols-1 gap-2 mt-2">
+                        <input placeholder="Name" value={menuForm.name} onChange={e=>setMenuForm(prev=>({...prev,name:e.target.value}))} className="border p-2 rounded"/>
+                        <input placeholder="Price" value={menuForm.price} onChange={e=>setMenuForm(prev=>({...prev,price:e.target.value}))} className="border p-2 rounded"/>
+                        <input placeholder="Stock" value={menuForm.stock} onChange={e=>setMenuForm(prev=>({...prev,stock:e.target.value}))} className="border p-2 rounded"/>
+                        <input placeholder="Description" value={menuForm.desc} onChange={e=>setMenuForm(prev=>({...prev,desc:e.target.value}))} className="border p-2 rounded"/>
+                        <input ref={fileRef} type="file" accept="image/*" onChange={(e)=> {
+                          const f = e.target.files && e.target.files[0];
+                          if(!f) return;
+                          const reader = new FileReader();
+                          reader.onload = (ev) => setMenuForm(prev => ({ ...prev, image: ev.target.result }));
+                          reader.readAsDataURL(f);
+                        }} className="border p-2 rounded"/>
+                        <div className="flex gap-2">
+                          <button onClick={saveMenuItem} className="px-3 py-1 bg-green-600 text-white rounded">{editingId ? "Save" : "Add"}</button>
+                          {editingId && <button onClick={()=>{ setEditingId(null); setMenuForm({ name: "", price: "", desc: "", image: "", stock: "" }); if(fileRef.current) fileRef.current.value = null; }} className="px-3 py-1 border rounded">Cancel</button>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Orders full management */}
+                  <div className="mt-4">
+                    <h4 className="font-semibold">Orders Management</h4>
+                    <div className="mt-2 space-y-2 max-h-64 overflow-auto">
+                      {orders.length === 0 && <div className="text-sm text-gray-500">No orders yet</div>}
+                      {orders.map(o => (
+                        <div key={o.id} className="border p-2 rounded bg-gray-50">
+                          <div className="flex justify-between">
+                            <div><strong>{o.id}</strong> • {o.student}</div>
+                            <div className="text-sm">{o.paymentMethod.toUpperCase()}</div>
+                          </div>
+                          <div className="text-xs mt-1">Items: {o.items.map(i => i.name + " x" + i.qty).join(", ")}</div>
+                          <div className="text-xs">Total: ₹{o.total}</div>
+                          <div className="text-xs">Status: {o.served ? "Served" : o.approved ? "Approved" : (o.paymentMethod==='cash' ? "Pending (cash)" : "Paid/Online")}</div>
+                          <div className="mt-2 flex gap-2">
+                            {!o.approved && o.paymentMethod === 'cash' && <button onClick={()=>approveOrder(o.id)} className="px-2 py-1 bg-green-600 text-white rounded text-sm">Approve</button>}
+                            { (o.approved || o.paymentMethod==='online') && !o.served && <button onClick={()=>markServedByCode(o.pickupCode)} className="px-2 py-1 bg-blue-600 text-white rounded text-sm">Mark Served</button>}
+                            <button onClick={()=> {
+                              // open QR in new small window
+                              const w = window.open("", "_blank", "width=260,height=320");
+                              if (!w) return alert("Popup blocked");
+                              w.document.write("<div id='q'></div><p style='font-family:sans-serif'>Code: "+(o.pickupCode||"n/a")+"</p>");
+                              const d = w.document.getElementById("q");
+                              new QRCode(d, { text: o.pickupCode || "NO_CODE", width: 200, height: 200 });
+                            }} className="px-2 py-1 border rounded text-sm">Open QR</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-3">
+                      <button onClick={()=>setScannerOpen(true)} className="px-3 py-1 bg-purple-600 text-white rounded">Open Camera Scanner</button>
+                      {scannerOpen && (
+                        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center">
+                          <div className="bg-white p-4 rounded qr-scanner-modal">
+                            <div id="qr-reader" style={{ width: "100%" }}></div>
+                            <div className="mt-2 flex gap-2">
+                              <button onClick={()=>setScannerOpen(false)} className="px-3 py-1 bg-red-600 text-white rounded">Close</button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* FOOTER */}
+        <div className="mt-8 text-xs text-gray-600">This project is made by black box</div>
+      </div>
+    );
+  }
+
+  // ===== Render App =====
+  ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+  </script>
+</body>
+</html>

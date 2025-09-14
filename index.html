@@ -1,28 +1,22 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Canteen Preorder — All Features Demo</title>
-
-  <!-- TailwindCSS (CDN for demo) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Canteen Preorder App</title>
   <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- React + ReactDOM UMD -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-
-  <!-- Babel for JSX -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-  <!-- QR code generator (qrcodejs) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-
-  <!-- HTML5 QR CODE SCANNER -->
   <script src="https://unpkg.com/html5-qrcode@2.3.7/minified/html5-qrcode.min.js"></script>
-
   <style>
-    body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    body {
+      font-family: 'Inter', sans-serif;
+    }
     .qr-scanner-modal { max-width: 520px; width: 96%; }
   </style>
 </head>
@@ -30,559 +24,610 @@
   <div id="root" class="p-4"></div>
 
   <script type="text/babel">
-  const { useState, useEffect, useRef } = React;
+    const { useState, useEffect, useRef } = React;
 
-  // ===== Helper utilities =====
-  const LS_MENU = "canteen_menu_v3";
-  const LS_ORDERS = "canteen_orders_v3";
-  const LS_ADMIN_PASS = "canteen_admin_pass_v3";
+    const LS_MENU = "canteen_menu_v1";
+    const LS_ORDERS = "canteen_orders_v1";
+    const LS_ADMIN_PASS = "canteen_admin_pass_v1";
 
-  function uid(prefix = "") {
-    return prefix + Math.random().toString(36).slice(2, 9);
-  }
+    const DEFAULT_MENU = [
+      { id: "m1", name: "Veg Thali", price: 60, desc: "Rice, sabzi, dal, chapati", image: "", stock: 10 },
+      { id: "m2", name: "Chicken Biryani", price: 120, desc: "Spiced rice with chicken", image: "", stock: 8 },
+      { id: "m3", name: "Veg Sandwich", price: 40, desc: "Veggie sandwich with chutney", image: "", stock: 15 },
+      { id: "m4", name: "Coffee", price: 15, desc: "Hot filter coffee", image: "", stock: 25 }
+    ];
 
-  function nowHuman() {
-    return new Date().toLocaleString();
-  }
+    function uid(prefix = "") { return prefix + Math.random().toString(36).slice(2, 9); }
 
-  // ===== DEFAULT MENU =====
-  const DEFAULT_MENU = [
-    { id: "m1", name: "Veg Thali", price: 60, desc: "Rice, sabzi, dal, chapati", image: "", stock: 10 },
-    { id: "m2", name: "Chicken Biryani", price: 120, desc: "Spiced rice with chicken", image: "", stock: 8 },
-    { id: "m3", name: "Veg Sandwich", price: 40, desc: "Veggie sandwich with chutney", image: "", stock: 15 },
-    { id: "m4", name: "Coffee", price: 15, desc: "Hot filter coffee", image: "", stock: 25 },
-  ];
-
-  // ===== QR helpers =====
-  function renderQRCode(targetEl, text, size = 120) {
-    if (!targetEl) return;
-    targetEl.innerHTML = "";
-    new QRCode(targetEl, { text: String(text), width: size, height: size });
-  }
-
-  // ===== MAIN APP =====
-  function App() {
-    // load persisted menu/orders/adminPass
-    const [menu, setMenu] = useState(() => {
-      try { return JSON.parse(localStorage.getItem(LS_MENU)) || DEFAULT_MENU; } catch (e) { return DEFAULT_MENU; }
-    });
-    const [orders, setOrders] = useState(() => {
-      try { return JSON.parse(localStorage.getItem(LS_ORDERS)) || []; } catch (e) { return []; }
-    });
-    const [adminPass, setAdminPass] = useState(() => {
-      return localStorage.getItem(LS_ADMIN_PASS) || "1234";
-    });
-
-    // app UI state
-    const [page, setPage] = useState("home"); // home, menu
-    const [studentName, setStudentName] = useState("");
-    const [cart, setCart] = useState([]);
-    const [message, setMessage] = useState("");
-
-    // admin state
-    const [adminModeVisible, setAdminModeVisible] = useState(false); // small admin button visibility on menu page
-    const [adminAuth, setAdminAuth] = useState(false);
-    const [adminInput, setAdminInput] = useState("");
-    const [adminNewPass, setAdminNewPass] = useState("");
-
-    // admin menu form
-    const [editingId, setEditingId] = useState(null);
-    const [menuForm, setMenuForm] = useState({ name: "", price: "", desc: "", stock: "", image: "" });
-    const fileRef = useRef(null);
-
-    // scanner
-    const [scannerOpen, setScannerOpen] = useState(false);
-    const scannerRef = useRef(null);
-    const scannerInstanceRef = useRef(null);
-
-    // persist menu/orders/adminPass
-    useEffect(() => { localStorage.setItem(LS_MENU, JSON.stringify(menu)); }, [menu]);
-    useEffect(() => { localStorage.setItem(LS_ORDERS, JSON.stringify(orders)); }, [orders]);
-    useEffect(() => { localStorage.setItem(LS_ADMIN_PASS, adminPass); }, [adminPass]);
-
-    // ===== Cart & ordering logic =====
-    function addToCart(item) {
-      if (item.stock <= 0) { setMessage(item.name + " is out of stock"); setTimeout(()=>setMessage(""),3000); return; }
-      const ex = cart.find(c => c.id === item.id);
-      if (ex) setCart(cart.map(c => c.id === item.id ? { ...c, qty: c.qty + 1 } : c));
-      else setCart([...cart, { ...item, qty: 1 }]);
-    }
-    function changeQty(id, delta) {
-      setCart(prev => prev.map(c => c.id === id ? { ...c, qty: Math.max(0, c.qty + delta) } : c).filter(c => c.qty > 0));
-    }
-    function cartTotal() { return cart.reduce((s,c)=>s + (Number(c.price)||0)*c.qty, 0); }
-
-    function generatePickupCode() {
-      let code;
-      const used = new Set(orders.map(o => o.pickupCode).filter(Boolean));
-      do { code = Math.floor(100000 + Math.random()*900000).toString(); } while (used.has(code));
-      return code;
+    function Modal({ title, children, onClose }) {
+      return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-xl max-w-lg w-full m-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">{title}</h3>
+              <button onClick={onClose} className="text-gray-500 hover:text-gray-700">&times;</button>
+            </div>
+            {children}
+          </div>
+        </div>
+      );
     }
 
-    // Place order: paymentMethod = 'online' or 'cash'
-    function placeOrder(paymentMethod) {
-      if (!studentName.trim()) { setMessage("Enter your name"); return; }
-      if (cart.length === 0) { setMessage("Cart is empty"); return; }
-      // check stock available for each item
-      for (let c of cart) {
-        const menuItem = menu.find(m => m.id === c.id);
-        if (!menuItem || (menuItem.stock < c.qty)) {
-          setMessage(`Not enough stock for ${c.name}`);
-          return;
+    function OrderQR({ code, size = 120 }) {
+      const ref = useRef(null);
+      useEffect(() => {
+        if (!ref.current) return;
+        ref.current.innerHTML = "";
+        if (!code) return;
+        if (typeof QRCode === 'undefined') {
+            console.error('QRCode library not loaded.');
+            return;
+        }
+        new QRCode(ref.current, { text: String(code), width: size, height: size });
+      }, [code, size]);
+      return <div ref={ref} />;
+    }
+
+    // Separate Page Components
+    function Home({ studentName, setStudentName, go, totalSold, pendingCount, completedCount }) {
+      return (
+        <div className="grid md:grid-cols-2 gap-6">
+          <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-xl font-bold">Welcome</h2>
+            <p className="text-gray-700 mt-2">Pre-order canteen food, choose payment method, and pick up using a code/QR.</p>
+            <div className="mt-4">
+              <label className="block text-sm">Your name (for tracking orders)</label>
+              <input value={studentName} onChange={e => setStudentName(e.target.value)} className="border p-2 rounded-lg w-full mt-1" placeholder="Your name" />
+            </div>
+            <div className="mt-4 flex gap-2">
+              <button onClick={() => go("#/menu")} className="px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors hover:bg-orange-700">Go to Menu</button>
+              <button onClick={() => go("#/orders")} className="px-4 py-2 border rounded-lg transition-colors hover:bg-gray-100">My Orders</button>
+             <button onClick={() => go("#/admin")} className="px-4 py-2 border rounded-lg transition-colors hover:bg-gray-100">ADMIN</button>
+              </div>
+          </div>
+          <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-xl font-bold">How it works</h2>
+            <ol className="list-decimal ml-5 mt-2 text-gray-700">
+              <li>Browse the menu and add items to your cart.</li>
+              <li>Choose Online (receive code immediately) or Cash (requires admin approval).</li>
+              <li>The admin approves cash orders, and a pickup code is then generated.</li>
+              <li>The admin can scan your QR code or enter your code to mark the order as served.</li>
+            </ol>
+          </div>
+        </div>
+      );
+    }
+
+    function MenuPage({ menu, cart, studentName, messageModal, addToCart, changeQty, cartTotal, placeOrder, go }) {
+      return (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold">Menu</h2>
+            <div className="flex gap-2">
+              <button onClick={() => go("#/")} className="px-3 py-1 border rounded-lg transition-colors hover:bg-gray-100">Back</button>
+              <button onClick={() => go("#/orders")} className="px-3 py-1 border rounded-lg transition-colors hover:bg-gray-100">My Orders</button>
+            </div>
+          </div>
+          <div className="grid md:grid-cols-2 gap-4">
+            {menu.map(item => (
+              <div key={item.id} className="bg-white p-4 rounded-lg shadow-md flex gap-4 items-center">
+                <div className="w-24 h-24 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
+                  {item.image ? <img src={item.image} alt={item.name} className="w-full h-full object-cover" /> : <div className="text-xs text-gray-400 p-2 text-center">No image</div>}
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h3 className="font-semibold text-lg">{item.name}</h3>
+                      <div className="text-sm text-gray-600">{item.desc}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-semibold text-lg">₹{item.price}</div>
+                      <div className={`text-sm ${item.stock > 5 ? 'text-green-600' : item.stock > 0 ? 'text-yellow-600' : 'text-red-600'}`}>Stock: {item.stock}</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <button disabled={item.stock <= 0} onClick={() => addToCart(item)} className={`px-4 py-2 rounded-lg text-white font-medium transition-colors ${item.stock > 0 ? 'bg-orange-500 hover:bg-orange-600' : 'bg-gray-300 cursor-not-allowed'}`}>
+                      Add to Cart
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="bg-white p-6 rounded-lg shadow-md mt-6">
+            <h3 className="font-bold text-lg">Your Cart</h3>
+            {cart.length === 0 ? <div className="text-sm text-gray-500 mt-2">Your cart is empty.</div> : (
+              <div className="mt-4">
+                {cart.map(c => (
+                  <div key={c.id} className="flex justify-between items-center border-b py-2">
+                    <div>{c.name} x{c.qty}</div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => changeQty(c.id, -1)} className="px-3 py-1 border rounded-lg hover:bg-gray-100 transition-colors">-</button>
+                      <button onClick={() => changeQty(c.id, 1)} className="px-3 py-1 border rounded-lg hover:bg-gray-100 transition-colors">+</button>
+                    </div>
+                  </div>
+                ))}
+                <div className="mt-4 text-right text-xl">Total: <strong>₹{cartTotal()}</strong></div>
+                <div className="mt-4 flex gap-2">
+                  <button onClick={() => placeOrder('online')} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Pay Online</button>
+                  <button onClick={() => placeOrder('cash')} className="px-4 py-2 border rounded-lg hover:bg-gray-100 transition-colors">Pay Cash (Pending)</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function OrdersPage({ orders, studentName, go }) {
+      const myOrders = orders.filter(o => o.student === studentName);
+      return (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold">My Orders</h2>
+            <div className="flex gap-2">
+              <button onClick={() => go("#/menu")} className="px-3 py-1 border rounded-lg transition-colors hover:bg-gray-100">Back to Menu</button>
+              <button onClick={() => go("#/")} className="px-3 py-1 border rounded-lg transition-colors hover:bg-gray-100">Home</button>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {studentName.trim() === "" && <div className="text-sm text-gray-500">Enter your name on the Home page to see your orders.</div>}
+            {myOrders.length === 0 && studentName.trim() !== "" && <div className="text-sm text-gray-500">You have no orders yet.</div>}
+            {myOrders.map(o => (
+              <div key={o.id} className="border p-4 rounded-lg bg-white shadow-md">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <strong>Order {o.id.substring(0, 8)}...</strong>
+                    <div className="text-xs text-gray-500">{new Date(o.createdAt).toLocaleString()}</div>
+                  </div>
+                  <div className="text-sm font-medium">{o.paymentMethod.toUpperCase()}</div>
+                </div>
+                <div className="mt-2 text-sm">Items: {o.items.map(i => `${i.name} x${i.qty}`).join(", ")}</div>
+                <div className="mt-2 text-sm">Total: ₹{o.total}</div>
+                <div className="mt-3">
+                  {o.approved || o.paymentMethod === 'online' ? (
+                    <>
+                      <div className="text-sm">Pickup Code: <strong>{o.pickupCode}</strong></div>
+                      <div id={`qr-${o.id}`} className="mt-2 flex justify-center"></div>
+                    </>
+                  ) : <div className="text-sm text-yellow-600 mt-2">Awaiting admin approval (cash)</div>}
+                </div>
+                <div className="mt-2 text-sm">Status: {o.served ? <span className="text-green-600 font-medium">Served</span> : <span className="text-yellow-600 font-medium">Pending</span>}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    function AdminPage({ adminAuth, setAdminAuth, adminInput, setAdminInput, adminPassword, go, totalSold, pendingCount, completedCount, orders, approveOrder, markServedByCode, setMessageModal, menu, editMenu, deleteMenu, modal, setModal, editingId, menuForm, setMenuForm, fileRef, saveMenuItem, adminNewPass, setAdminNewPass, changeAdminPassword, setScannerOpen }) {
+      const [authError, setAuthError] = useState('');
+      const login = () => {
+        if (adminInput === adminPassword) {
+            setAdminAuth(true);
+            setAdminInput('');
+            setAuthError('');
+             setRoute("#/admin");
+        } else {
+            setAuthError('Wrong password');
+        }
+      };
+
+      return (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold">Admin Panel</h2>
+            <div className="flex gap-2">
+              <button onClick={() => go("#/menu")} className="px-3 py-1 border rounded-lg hover:bg-gray-100 transition-colors">Back</button>
+              <button onClick={() => go("#/")} className="px-3 py-1 border rounded-lg hover:bg-gray-100 transition-colors">Home</button>
+            </div>
+          </div>
+          {!adminAuth ? (
+            <div className="bg-white p-6 rounded-lg shadow-md max-w-md mx-auto">
+              <h3 className="font-bold text-lg">Admin Login</h3>
+              <input type="password" value={adminInput} onChange={e => setAdminInput(e.target.value)} placeholder="Admin password" className="border p-2 rounded-lg w-full mt-2" />
+              {authError && <div className="text-red-500 text-sm mt-1">{authError}</div>}
+              <div className="flex gap-2 mt-4">
+                <button onClick={login} className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors">Login</button>
+                <button onClick={() => go("#/")} className="px-4 py-2 border rounded-lg hover:bg-gray-100 transition-colors">Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <div className="bg-white p-6 rounded-lg shadow-md">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-lg">Dashboard</h3>
+                  <button onClick={() => setAdminAuth(false)} className="px-3 py-1 border rounded-lg hover:bg-gray-100 transition-colors">Logout</button>
+                </div>
+                <div className="mt-4 text-sm space-y-1">
+                  <div>Total items sold: <strong>{totalSold}</strong></div>
+                  <div>Pending approvals: <strong>{pendingCount}</strong></div>
+                  <div>Completed (served): <strong>{completedCount}</strong></div>
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-lg shadow-md">
+                <h4 className="font-bold text-lg">Orders</h4>
+                <div className="mt-4 space-y-3 max-h-80 overflow-y-auto">
+                  {orders.length === 0 && <div className="text-sm text-gray-500">No orders yet.</div>}
+                  {orders.map(o => (
+                    <div key={o.id} className="border p-4 rounded-lg bg-gray-50">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <strong>Order {o.id.substring(0, 8)}...</strong> • {o.student}
+                        </div>
+                        <div className="text-sm">{o.paymentMethod.toUpperCase()}</div>
+                      </div>
+                      <div className="text-xs text-gray-600 mt-1">Items: {o.items.map(i => `${i.name} x${i.qty}`).join(", ")}</div>
+                      <div className="text-xs text-gray-600">Total: ₹{o.total}</div>
+                      <div className="mt-2 text-sm font-medium">
+                        Status: {o.served ? "Served" : o.approved ? "Approved" : (o.paymentMethod === 'cash' ? "Pending (cash)" : "Paid/Online")}
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {!o.approved && o.paymentMethod === 'cash' && <button onClick={() => approveOrder(o.id)} className="px-3 py-1 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Approve Cash</button>}
+                        {(o.approved || o.paymentMethod === 'online') && !o.served && <button onClick={() => markServedByCode(o.pickupCode)} className="px-3 py-1 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Mark Served</button>}
+                        <button onClick={() => {
+                          setMessageModal({ isOpen: true, title: 'Pickup Code', message: `Pickup code: ${o.pickupCode || 'N/A'}` });
+                        }} className="px-3 py-1 border rounded-lg text-sm hover:bg-gray-100">View Code</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4">
+                  <button onClick={() => setScannerOpen(true)} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">Open Camera Scanner</button>
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-lg shadow-md">
+                <h4 className="font-bold text-lg">Manage Menu</h4>
+                <div className="mt-4 space-y-3">
+                  {menu.map(m => (
+                    <div key={m.id} className="flex justify-between items-center border p-3 rounded-lg bg-gray-50">
+                      <div className="flex items-center gap-4">
+                        <div className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
+                          {m.image ? <img src={m.image} alt={m.name} className="w-full h-full object-cover" /> : <div className="text-xs text-gray-400 p-2 text-center">No image</div>}
+                        </div>
+                        <div>
+                          <div className="font-medium text-base">{m.name}</div>
+                          <div className="text-xs text-gray-600">₹{m.price} • Stock: {m.stock}</div>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        <button onClick={() => editMenu(m)} className="px-3 py-1 border rounded-lg text-sm hover:bg-gray-100">Edit</button>
+                        <button onClick={() => deleteMenu(m.id)} className="px-3 py-1 border rounded-lg text-sm text-red-600 hover:bg-red-50">Delete</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 border p-4 rounded-lg shadow-inner">
+                  <h5 className="font-semibold text-base">{editingId ? "Edit Item" : "Add New Item"}</h5>
+                  <div className="grid grid-cols-1 gap-3 mt-3">
+                    <input placeholder="Name" value={menuForm.name} onChange={e => setMenuForm(prev => ({ ...prev, name: e.target.value }))} className="border p-2 rounded-lg" />
+                    <input type="number" placeholder="Price" value={menuForm.price} onChange={e => setMenuForm(prev => ({ ...prev, price: e.target.value }))} className="border p-2 rounded-lg" />
+                    <input type="number" placeholder="Stock" value={menuForm.stock} onChange={e => setMenuForm(prev => ({ ...prev, stock: e.target.value }))} className="border p-2 rounded-lg" />
+                    <input placeholder="Description" value={menuForm.desc} onChange={e => setMenuForm(prev => ({ ...prev, desc: e.target.value }))} className="border p-2 rounded-lg" />
+                    <input ref={fileRef} type="file" accept="image/*" onChange={e => {
+                      const f = e.target.files && e.target.files[0];
+                      if (!f) return;
+                      const reader = new FileReader();
+                      reader.onload = ev => setMenuForm(prev => ({ ...prev, image: ev.target.result }));
+                      reader.readAsDataURL(f);
+                    }} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100" />
+                    <div className="flex gap-2">
+                      <button onClick={saveMenuItem} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">{editingId ? "Save Changes" : "Add Item"}</button>
+                      {editingId && <button onClick={() => { setEditingId(null); setMenuForm({ name: "", price: "", desc: "", image: "", stock: "" }); if (fileRef.current) fileRef.current.value = null; }} className="px-4 py-2 border rounded-lg hover:bg-gray-100 transition-colors">Cancel</button>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-lg shadow-md">
+                <h4 className="font-bold text-lg">Settings</h4>
+                <div className="mt-4">
+                  <label className="block text-sm">Change Admin Password</label>
+                  <input type="password" value={adminNewPass} onChange={e => setAdminNewPass(e.target.value)} className="border p-2 rounded-lg w-full mt-1" placeholder="New password" />
+                  <div className="mt-3">
+                    <button onClick={changeAdminPassword} className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors">Change Password</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function App() {
+      const [menu, setMenu] = useState(() => {
+        try { return JSON.parse(localStorage.getItem(LS_MENU)) || DEFAULT_MENU; } catch(e) { return DEFAULT_MENU; }
+      });
+      const [orders, setOrders] = useState(() => {
+        try { return JSON.parse(localStorage.getItem(LS_ORDERS)) || []; } catch(e) { return []; }
+      });
+      const [adminPass, setAdminPass] = useState(() => localStorage.getItem(LS_ADMIN_PASS) || "1234");
+      
+      const [route, setRoute] = useState(window.location.hash || "#/");
+
+      const [studentName, setStudentName] = useState("");
+      const [cart, setCart] = useState([]);
+
+      const [adminAuth, setAdminAuth] = useState(false);
+      const [adminInput, setAdminInput] = useState("");
+      const [adminNewPass, setAdminNewPass] = useState("");
+
+      const [editingId, setEditingId] = useState(null);
+      const [menuForm, setMenuForm] = useState({ name: "", price: "", desc: "", stock: "", image: "" });
+      const fileRef = useRef(null);
+
+      const [scannerOpen, setScannerOpen] = useState(false);
+      const scannerInstanceRef = useRef(null);
+      
+      const [modal, setModal] = useState({
+        isOpen: false,
+        title: '',
+        content: null,
+        onConfirm: null,
+        onCancel: null
+      });
+
+      const [messageModal, setMessageModal] = useState({
+        isOpen: false,
+        title: '',
+        message: ''
+      });
+
+      // Persist data to localStorage
+      useEffect(() => { localStorage.setItem(LS_MENU, JSON.stringify(menu)); }, [menu]);
+      useEffect(() => { localStorage.setItem(LS_ORDERS, JSON.stringify(orders)); }, [orders]);
+      useEffect(() => { localStorage.setItem(LS_ADMIN_PASS, adminPass); }, [adminPass]);
+
+      // Hash routing
+      useEffect(() => {
+        function onHash() { setRoute(window.location.hash || "#/"); }
+        window.addEventListener("hashchange", onHash);
+        return () => window.removeEventListener("hashchange", onHash);
+      }, []);
+      
+      // Render QRs after orders update
+      useEffect(() => {
+        orders.forEach(o => {
+          const el = document.getElementById("qr-" + o.id);
+          if (el) {
+            el.innerHTML = "";
+            if (o.pickupCode) {
+              if (typeof QRCode !== 'undefined') {
+                new QRCode(el, { text: String(o.pickupCode), width: 100, height: 100 });
+              } else {
+                console.error("QRCode library not loaded.");
+              }
+            }
+          }
+        });
+      }, [orders]);
+
+      // Helper: find menu item
+      function findMenuItem(id) { return menu.find(m => m.id === id); }
+
+      // Cart functions
+      function addToCart(item) {
+        if (item.stock <= 0) { setMessageModal({ isOpen: true, title: 'Out of Stock', message: `${item.name} is out of stock.` }); return; }
+        const ex = cart.find(c => c.id === item.id);
+        if (ex) setCart(cart.map(c => c.id === item.id ? { ...c, qty: c.qty + 1 } : c));
+        else setCart([...cart, { id: item.id, name: item.name, price: item.price, qty: 1 }]);
+      }
+      function changeQty(id, delta) {
+        setCart(prev => prev.map(c => c.id === id ? { ...c, qty: Math.max(0, c.qty + delta) } : c).filter(c => c.qty > 0));
+      }
+      function cartTotal() { return cart.reduce((s, c) => s + (Number(c.price) || 0) * c.qty, 0); }
+
+      // Pickup code generator (unique among orders)
+      function generatePickupCode() {
+        const used = new Set(orders.map(o => o.pickupCode).filter(Boolean));
+        let code;
+        do { code = Math.floor(100000 + Math.random() * 900000).toString(); } while (used.has(code));
+        return code;
+      }
+
+      // Place order
+      function placeOrder(paymentMethod) {
+        if (!studentName.trim()) { setMessageModal({ isOpen: true, title: 'Name Required', message: "Please enter your name." }); return; }
+        if (cart.length === 0) { setMessageModal({ isOpen: true, title: 'Cart Empty', message: "Your cart is empty." }); return; }
+
+        for (let c of cart) {
+          const m = findMenuItem(c.id);
+          if (!m || m.stock < c.qty) { setMessageModal({ isOpen: true, title: 'Stock Error', message: `Not enough stock for ${c.name}.` }); return; }
+        }
+
+        const id = uid("ORD-");
+        const createdAt = new Date().toISOString();
+        const total = cartTotal();
+
+        if (paymentMethod === "online") {
+          setMenu(prev => prev.map(m => {
+            const ordered = cart.find(c => c.id === m.id);
+            return ordered ? { ...m, stock: m.stock - ordered.qty } : m;
+          }));
+          const pickupCode = generatePickupCode();
+          const order = { id, student: studentName, items: cart, total, paymentMethod: "online", paid: true, approved: true, pickupCode, served: false, createdAt };
+          setOrders(prev => [order, ...prev]);
+          setCart([]);
+          setMessageModal({ isOpen: true, title: 'Order Placed', message: `Order placed (online). Your pickup code is: ${pickupCode}` });
+          window.location.hash = "#/orders";
+        } else {
+          const order = { id, student: studentName, items: cart, total, paymentMethod: "cash", paid: false, approved: false, pickupCode: null, served: false, createdAt };
+          setOrders(prev => [order, ...prev]);
+          setCart([]);
+          setMessageModal({ isOpen: true, title: 'Order Placed', message: "Order placed (cash). Awaiting admin approval." });
+          window.location.hash = "#/orders";
         }
       }
 
-      const id = uid("ORD-");
-      const createdAt = new Date().toISOString();
-      const total = cartTotal();
-      const order = {
-        id, student: studentName, items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, qty: c.qty })),
-        total, paymentMethod, paid: paymentMethod === "online", approved: paymentMethod === "online", served: false,
-        pickupCode: paymentMethod === "online" ? generatePickupCode() : null,
-        createdAt
-      };
+      // Admin approves cash order
+      function approveOrder(orderId) {
+        const ord = orders.find(o => o.id === orderId);
+        if (!ord || ord.approved) return;
 
-      setOrders(prev => [order, ...prev]);
-
-      // If paymentMethod === 'online', immediately reduce stock
-      if (paymentMethod === "online") {
+        for (let it of ord.items) {
+          const m = findMenuItem(it.id);
+          if (!m || m.stock < it.qty) { setMessageModal({ isOpen: true, title: 'Stock Error', message: `Not enough stock for ${it.name}.` }); return; }
+        }
         setMenu(prev => prev.map(m => {
-          const ordered = cart.find(c => c.id === m.id);
-          if (!ordered) return m;
-          return { ...m, stock: m.stock - ordered.qty };
+          const ordered = ord.items.find(i => i.id === m.id);
+          return ordered ? { ...m, stock: m.stock - ordered.qty } : m;
         }));
+        const code = generatePickupCode();
+        setOrders(prev => prev.map(o => o.id === orderId ? { ...o, approved: true, pickupCode: code } : o));
+        setMessageModal({ isOpen: true, title: 'Order Approved', message: `Order ${orderId} approved. Pickup code: ${code}` });
       }
 
-      setCart([]);
-      setMessage(paymentMethod === "online" ? `Order placed (online). Pickup code shown in My Orders.` : `Order placed (cash). Pending admin approval.`);
-      setTimeout(()=>setMessage(""),4000);
-    }
+      // Mark served by code
+      function markServedByCode(code) {
+        if (!code) return;
+        const orderToServe = orders.find(o => o.pickupCode === code);
+        if (!orderToServe) { setMessageModal({ isOpen: true, title: 'Order Not Found', message: `No order found for code ${code}.` }); return; }
+        if (orderToServe.served) { setMessageModal({ isOpen: true, title: 'Already Served', message: 'Order has already been served.' }); return; }
 
-    // Admin approves cash order: set approved true, generate pickupCode, reduce stock
-    function approveOrder(orderId) {
-      const ord = orders.find(o => o.id === orderId);
-      if (!ord) return;
-      // check stock again
-      for (let it of ord.items) {
-        const menuItem = menu.find(m => m.id === it.id);
-        if (!menuItem || menuItem.stock < it.qty) { alert(`Not enough stock to approve for ${it.name}`); return; }
+        setOrders(prev => prev.map(o => o.id === orderToServe.id ? { ...o, served: true } : o));
+        setMessageModal({ isOpen: true, title: 'Order Served', message: `Order ${orderToServe.id} served for ${orderToServe.student}.` });
       }
-      // reduce stock
-      setMenu(prev => prev.map(m => {
-        const ordered = ord.items.find(i => i.id === m.id);
-        if (!ordered) return m;
-        return { ...m, stock: m.stock - ordered.qty };
-      }));
-      // set approved and generate code
-      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, approved: true, pickupCode: generatePickupCode() } : o));
-    }
 
-    function markServedByCode(code) {
-      const ord = orders.find(o => o.pickupCode === code);
-      if (!ord) { alert("No order found for code " + code); return; }
-      if (ord.served) { alert("Order already served"); return; }
-      setOrders(prev => prev.map(o => o.id === ord.id ? { ...o, served: true } : o));
-      alert(`Order ${ord.id} served for ${ord.student}`);
-    }
+      // Stats
+      const totalSold = orders.reduce((sum, o) => {
+        if (o.paymentMethod === "online" || o.approved) {
+          return sum + o.items.reduce((s, i) => s + (i.qty || 0), 0);
+        }
+        return sum;
+      }, 0);
+      const pendingCount = orders.filter(o => o.paymentMethod === "cash" && !o.approved).length;
+      const completedCount = orders.filter(o => o.served).length;
 
-    // Admin: change password
-    function changeAdminPassword(newPass) {
-      if (!newPass || newPass.length < 3) { alert("Password must be >= 3 chars"); return; }
-      setAdminPass(newPass);
-      setAdminNewPass("");
-      alert("Admin password changed");
-    }
-
-    // Admin: add/edit/delete menu items; image upload base64
-    function handleMenuImageFile(e) {
-      const f = e.target.files && e.target.files[0];
-      if (!f) return;
-      const reader = new FileReader();
-      reader.onload = ev => setMenuForm(prev => ({ ...prev, image: ev.target.result }));
-      reader.readAsDataURL(f);
-    }
-
-    function saveMenuItem() {
-      if (!menuForm.name || !menuForm.price) { alert("Name & price required"); return; }
-      if (editingId) {
-        setMenu(prev => prev.map(m => m.id === editingId ? { ...m, name: menuForm.name, price: Number(menuForm.price), desc: menuForm.desc, image: menuForm.image, stock: Number(menuForm.stock||0) } : m));
-        setEditingId(null);
-      } else {
-        setMenu(prev => [...prev, { id: uid("m"), name: menuForm.name, price: Number(menuForm.price), desc: menuForm.desc, image: menuForm.image, stock: Number(menuForm.stock||0) }]);
+      // Admin: image upload as base64
+      function handleMenuImageFile(e) {
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = ev => setMenuForm(prev => ({ ...prev, image: ev.target.result }));
+        reader.readAsDataURL(f);
       }
-      setMenuForm({ name: "", price: "", desc: "", image: "", stock: "" });
-      if (fileRef.current) fileRef.current.value = null;
-    }
 
-    function editMenu(m) {
-      setEditingId(m.id);
-      setMenuForm({ name: m.name, price: m.price, desc: m.desc, image: m.image, stock: m.stock });
-    }
-    function deleteMenu(id) {
-      if (!confirm("Delete item?")) return;
-      setMenu(prev => prev.filter(m => m.id !== id));
-    }
+      function saveMenuItem() {
+        if (!menuForm.name || !menuForm.price) { setMessageModal({ isOpen: true, title: 'Validation Error', message: "Name & price are required." }); return; }
+        if (editingId) {
+          setMenu(prev => prev.map(m => m.id === editingId ? { ...m, name: menuForm.name, price: Number(menuForm.price), desc: menuForm.desc, image: menuForm.image, stock: Number(menuForm.stock || 0) } : m));
+          setEditingId(null);
+        } else {
+          setMenu(prev => [...prev, { id: uid("m"), name: menuForm.name, price: Number(menuForm.price), desc: menuForm.desc, image: menuForm.image, stock: Number(menuForm.stock || 0) }]);
+        }
+        setMenuForm({ name: "", price: "", desc: "", image: "", stock: "" });
+        if (fileRef.current) fileRef.current.value = null;
+      }
 
-    // stats
-    function stats() {
-      const totalSold = orders.reduce((sum,o) => sum + (o.approved || o.paymentMethod === "online" ? o.items.reduce((s,i)=>s+i.qty,0) : 0), 0);
-      const pending = orders.filter(o => (o.paymentMethod === "cash" && !o.approved)).length;
-      const completed = orders.filter(o => o.served).length;
-      return { totalSold, pending, completed };
-    }
+      function editMenu(m) { setEditingId(m.id); setMenuForm({ name: m.name, price: m.price, desc: m.desc, image: m.image, stock: m.stock }); }
+      function deleteMenu(id) {
+        setModal({
+          isOpen: true,
+          title: 'Confirm Delete',
+          content: 'Are you sure you want to delete this menu item?',
+          onConfirm: () => {
+            setMenu(prev => prev.filter(m => m.id !== id));
+            setModal({ isOpen: false });
+          },
+          onCancel: () => setModal({ isOpen: false })
+        });
+      }
 
-    // scanner open/close (html5-qrcode)
-    useEffect(() => {
-      if (scannerOpen) {
-        const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-        const html5Qr = new Html5Qrcode("qr-reader");
+      // Admin change password
+      function changeAdminPassword() {
+        if (!adminNewPass || adminNewPass.length < 3) { setMessageModal({ isOpen: true, title: 'Password Error', message: "Password must be >= 3 characters." }); return; }
+        setAdminPass(adminNewPass);
+        setAdminNewPass("");
+        setMessageModal({ isOpen: true, title: 'Success', message: 'Admin password changed.' });
+      }
+
+      // Camera scanner using Html5Qrcode
+      useEffect(() => {
+        if (!scannerOpen || !Html5Qrcode) return;
+        const id = "qr-reader";
+        const html5Qr = new Html5Qrcode(id);
         scannerInstanceRef.current = html5Qr;
-        html5Qr.start({ facingMode: "environment" }, config,
+        html5Qr.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } },
           (decoded) => {
-            // decoded text -> try mark served
-            // html5-qrcode returns decoded text string
             setScannerOpen(false);
-            try { html5Qr.stop(); } catch(e){}
+            try { html5Qr.stop(); } catch (e) {}
             markServedByCode(decoded);
           },
           (err) => {
-            // scan error or decode failure — ignore
+            // ignore
           }).catch(err => {
-            alert("Camera error: " + err);
+            setMessageModal({ isOpen: true, title: 'Camera Error', message: `Camera start failed: ${err.message}` });
             setScannerOpen(false);
           });
-      } else {
-        if (scannerInstanceRef.current) {
-          try { scannerInstanceRef.current.stop(); } catch(e){}
-          scannerInstanceRef.current = null;
-        }
-      }
-      return () => {
-        if (scannerInstanceRef.current) {
-          try { scannerInstanceRef.current.stop(); } catch(e){}
-          scannerInstanceRef.current = null;
-        }
+        return () => {
+          if (scannerInstanceRef.current) {
+            try { scannerInstanceRef.current.stop(); } catch(e){}
+            scannerInstanceRef.current = null;
+          }
+        };
+      }, [scannerOpen]);
+
+      // Render main container with route-based pages
+      const go = (routeHash) => { window.location.hash = routeHash; };
+
+      const pages = {
+        "#/": <Home studentName={studentName} setStudentName={setStudentName} go={go} totalSold={totalSold} pendingCount={pendingCount} completedCount={completedCount} />,
+        "#/menu": <MenuPage menu={menu} cart={cart} studentName={studentName} messageModal={messageModal} addToCart={addToCart} changeQty={changeQty} cartTotal={cartTotal} placeOrder={placeOrder} go={go} />,
+        "#/orders": <OrdersPage orders={orders} studentName={studentName} go={go} />,
+        "#/admin": <AdminPage adminAuth={adminAuth} setAdminAuth={setAdminAuth} adminInput={adminInput} setAdminInput={setAdminInput} adminPassword={adminPass} go={go} totalSold={totalSold} pendingCount={pendingCount} completedCount={completedCount} orders={orders} approveOrder={approveOrder} markServedByCode={markServedByCode} setMessageModal={setMessageModal} menu={menu} editMenu={editMenu} deleteMenu={deleteMenu} modal={modal} setModal={setModal} editingId={editingId} menuForm={menuForm} setMenuForm={setMenuForm} fileRef={fileRef} saveMenuItem={saveMenuItem} adminNewPass={adminNewPass} setAdminNewPass={setAdminNewPass} changeAdminPassword={changeAdminPassword} setScannerOpen={setScannerOpen} />
       };
-    }, [scannerOpen]);
 
-    // ===== Render UI =====
-    const s = stats();
-    return (
-      <div className="max-w-6xl mx-auto">
-        {/* HEADER */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-extrabold text-orange-700">CANTEEN PREORDER</h1>
-            <div className="text-sm text-gray-600">Welcome! Today: {new Date().toLocaleDateString()}</div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="text-sm text-gray-700">Page: <strong>{page === "home" ? "Home" : "Menu"}</strong></div>
-            <div className="text-sm text-gray-700">Stats: Sold <strong>{s.totalSold}</strong> • Pending <strong>{s.pending}</strong> • Served <strong>{s.completed}</strong></div>
-            <div>
-              {page === "home" ? (
-                <button onClick={() => setPage("menu")} className="px-3 py-1 bg-orange-500 text-white rounded">Go to Menu</button>
-              ) : (
-                <button onClick={() => setPage("home")} className="px-3 py-1 border rounded">Home</button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* MAIN PAGE */}
-        {page === "home" && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white p-6 rounded-lg shadow">
-              <h2 className="text-xl font-bold mb-2">Welcome Students</h2>
-              <p className="text-gray-600 mb-4">Order your canteen food in advance to skip the queue.</p>
-              <p className="mb-4">Click <strong>Go to Menu</strong> to browse and place orders.</p>
+      return (
+        <div className="p-4">
+          <div className="max-w-6xl mx-auto font-sans">
+            <header className="flex items-center justify-between mb-6 flex-wrap">
               <div>
-                <label className="block text-sm mb-1">Enter your name (for My Orders):</label>
-                <input value={studentName} onChange={e=>setStudentName(e.target.value)} className="border p-2 rounded w-full" placeholder="Your name" />
+                <h1 className="text-3xl font-extrabold text-orange-700">CANTEEN PREORDER</h1>
+                <div className="text-sm text-gray-600">Developed by Team Black Box</div>
               </div>
-            </div>
-
-            <div className="bg-white p-6 rounded-lg shadow">
-              <h2 className="text-xl font-bold mb-2">How it works</h2>
-              <ul className="list-disc pl-5 text-gray-700">
-                <li>Choose items and add to cart.</li>
-                <li>Select <strong>Online</strong> to simulate payment — pickup code & QR generated immediately.</li>
-                <li>Select <strong>Cash</strong> — order will be in Pending Approval; admin approves and then code & QR generated.</li>
-                <li>Admin can scan QR or enter code to mark order served.</li>
-              </ul>
-            </div>
+              <div className="flex items-center gap-3 text-sm flex-shrink-0 mt-2 md:mt-0">
+                <div className="px-3 py-1 bg-gray-100 rounded-lg">Sold: <strong>{totalSold}</strong></div>
+                <div className="px-3 py-1 bg-gray-100 rounded-lg">Pending: <strong>{pendingCount}</strong></div>
+                <div className="px-3 py-1 bg-gray-100 rounded-lg">Served: <strong>{completedCount}</strong></div>
+              </div>
+            </header>
+            <main>
+              {pages[route] || <Home />}
+            </main>
           </div>
-        )}
 
-        {/* MENU PAGE */}
-        {page === "menu" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* LEFT: Menu list */}
-            <div className="lg:col-span-2">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {menu.map(item => (
-                  <div key={item.id} className="bg-white p-4 rounded shadow flex gap-4">
-                    <div className="w-24 h-24 bg-gray-100 rounded overflow-hidden flex-shrink-0 flex items-center justify-center">
-                      {item.image ? <img src={item.image} alt={item.name} className="w-full h-full object-cover" /> : <div className="text-gray-400">No image</div>}
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <h3 className="font-semibold">{item.name}</h3>
-                          <div className="text-xs text-gray-600">{item.desc}</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="font-semibold">₹{item.price}</div>
-                          <div className={`text-sm ${item.stock>5 ? 'text-green-600' : item.stock>0 ? 'text-yellow-600' : 'text-red-600'}`}>Stock: {item.stock}</div>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex items-center gap-2">
-                        <button disabled={item.stock<=0} onClick={()=>addToCart(item)} className={`px-3 py-1 rounded ${item.stock>0 ? 'bg-orange-500 text-white' : 'bg-gray-300'}`}>Add</button>
-                        <div className="text-sm text-gray-600">ID: {item.id}</div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+          {modal.isOpen && (
+            <Modal title={modal.title} onClose={modal.onCancel}>
+              <p className="mt-2 text-gray-700">{modal.content}</p>
+              <div className="mt-4 flex gap-2 justify-end">
+                <button onClick={modal.onConfirm} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">Confirm</button>
+                <button onClick={modal.onCancel} className="px-4 py-2 border rounded-lg hover:bg-gray-100 transition-colors">Cancel</button>
               </div>
+            </Modal>
+          )}
 
-              {/* Cart + Place Order */}
-              <div className="bg-white p-4 rounded shadow mt-6">
-                <h3 className="font-bold">Cart</h3>
-                {cart.length === 0 ? <div className="text-sm text-gray-500">Cart is empty</div> : (
-                  <div>
-                    {cart.map(c=>(
-                      <div key={c.id} className="flex justify-between items-center border-b py-2">
-                        <div><strong>{c.name}</strong> x {c.qty}</div>
-                        <div className="flex items-center gap-2">
-                          <button onClick={()=>changeQty(c.id,-1)} className="px-2 border rounded">-</button>
-                          <button onClick={()=>changeQty(c.id,1)} className="px-2 border rounded">+</button>
-                        </div>
-                      </div>
-                    ))}
-                    <div className="mt-3">Total: <strong>₹{cartTotal()}</strong></div>
-                    <div className="mt-3 flex gap-2">
-                      <button onClick={()=>placeOrder('online')} className="px-3 py-1 bg-green-600 text-white rounded">Pay Online</button>
-                      <button onClick={()=>placeOrder('cash')} className="px-3 py-1 border rounded">Pay Cash (Pending)</button>
-                    </div>
-                  </div>
-                )}
-                {message && <div className="mt-2 text-red-600">{message}</div>}
+          {messageModal.isOpen && (
+            <Modal title={messageModal.title} onClose={() => setMessageModal({ isOpen: false })}>
+              <p className="mt-2 text-gray-700">{messageModal.message}</p>
+              <div className="mt-4 text-right">
+                <button onClick={() => setMessageModal({ isOpen: false })} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">OK</button>
               </div>
+            </Modal>
+          )}
 
-              {/* My Orders */}
-              <div className="bg-white p-4 rounded shadow mt-6">
-                <h3 className="font-bold">My Orders</h3>
-                {studentName.trim()==="" && <div className="text-sm text-gray-500">Enter your name on Home to see your orders here.</div>}
-                {orders.filter(o => o.student === studentName).length === 0 && studentName.trim()!=="" && <div className="text-sm text-gray-500">No orders.</div>}
-                {orders.filter(o => o.student === studentName).map(o=>(
-                  <div key={o.id} className="border p-3 rounded mb-2">
-                    <div className="flex justify-between">
-                      <div><strong>{o.id}</strong> • {new Date(o.createdAt).toLocaleString()}</div>
-                      <div className="text-sm">{o.paymentMethod.toUpperCase()}</div>
-                    </div>
-                    <div className="mt-2 text-sm">Items: {o.items.map(i=>`${i.name} x${i.qty}`).join(", ")}</div>
-                    <div className="mt-2 text-sm">Total: ₹{o.total}</div>
-                    <div className="mt-2 flex items-center gap-3">
-                      <div>
-                        {o.approved || o.paymentMethod === 'online' ? (
-                          <>
-                            <div className="text-sm">Pickup Code: <strong>{o.pickupCode}</strong></div>
-                            <div ref={el => o.qrTarget = el} className="mt-1"></div>
-                          </>
-                        ) : (
-                          <div className="text-sm text-yellow-600">Awaiting admin approval (cash)</div>
-                        )}
-                      </div>
-                      <div className="ml-auto text-sm">{o.served ? <span className="text-green-600">✅ Served</span> : <span className="text-yellow-600">Pending</span>}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+          {scannerOpen && (
+            <Modal title="Scan QR Code" onClose={() => setScannerOpen(false)}>
+              <div id="qr-reader" style={{ width: "100%" }}></div>
+            </Modal>
+          )}
+        </div>
+      );
+    }
 
-            {/* RIGHT: Admin small button + admin quick controls + orders */}
-            <div className="space-y-4">
-              {/* small admin button (bottom corner style) */}
-              <div className="fixed right-6 bottom-6">
-                <button onClick={()=>setAdminModeVisible(true)} className="px-3 py-2 bg-gray-900 text-white rounded-full shadow-lg">Admin</button>
-              </div>
-
-              {/* Admin panel (expanded when adminModeVisible clicked) */}
-              {adminModeVisible && (
-                <div className="bg-white p-4 rounded shadow">
-                  {!adminAuth ? (
-                    <>
-                      <div className="flex items-center justify-between">
-                        <h3 className="font-bold">Admin Login</h3>
-                        <button onClick={()=>setAdminModeVisible(false)} className="text-sm text-gray-500">Close</button>
-                      </div>
-                      <input type="password" placeholder="Password" value={adminInput} onChange={e=>setAdminInput(e.target.value)} className="w-full border p-2 rounded mt-2"/>
-                      <div className="flex gap-2 mt-2">
-                        <button onClick={()=>{ if(adminInput===adminPass) { setAdminAuth(true); setAdminInput(''); } else alert('Wrong password'); }} className="px-3 py-1 bg-orange-600 text-white rounded">Login</button>
-                        <button onClick={()=>{ setAdminModeVisible(false); setAdminInput(''); }} className="px-3 py-1 border rounded">Close</button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex items-center justify-between">
-                        <h3 className="font-bold">Admin Dashboard</h3>
-                        <div className="flex gap-2">
-                          <button onClick={()=>{ setAdminAuth(false); setAdminModeVisible(false); }} className="px-2 py-1 border rounded">Logout</button>
-                        </div>
-                      </div>
-
-                      {/* Quick stats */}
-                      <div className="mt-3 text-sm">
-                        <div>Total items sold: <strong>{s.totalSold}</strong></div>
-                        <div>Pending approvals: <strong>{s.pending}</strong></div>
-                        <div>Completed (served): <strong>{s.completed}</strong></div>
-                      </div>
-
-                      {/* Orders quick list */}
-                      <div className="mt-3">
-                        <h4 className="font-semibold">Recent Orders</h4>
-                        <div className="max-h-48 overflow-auto mt-2 space-y-2">
-                          {orders.map(o=>(
-                            <div key={o.id} className="border p-2 rounded">
-                              <div className="flex justify-between">
-                                <div><strong>{o.id}</strong> • {o.student}</div>
-                                <div className="text-sm">{o.paymentMethod.toUpperCase()}</div>
-                              </div>
-                              <div className="mt-1 text-xs">Items: {o.items.map(i=>i.name+" x"+i.qty).join(", ")}</div>
-                              <div className="mt-1 text-xs">Status: {o.served? "Served" : o.approved ? "Approved" : (o.paymentMethod==='cash' ? "Pending Approval" : "Paid/Online")}</div>
-                              <div className="mt-2 flex gap-2">
-                                {!o.approved && o.paymentMethod === 'cash' && <button onClick={()=>approveOrder(o.id)} className="px-2 py-1 bg-green-600 text-white rounded text-sm">Approve Cash</button>}
-                                {!o.served && (o.approved || o.paymentMethod==='online') && <button onClick={()=>markServedByCode(o.pickupCode)} className="px-2 py-1 bg-blue-600 text-white rounded text-sm">Mark Served</button>}
-                                <button onClick={()=>{ window.open('', '_blank'); }} className="px-2 py-1 border rounded text-sm">Details</button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Admin settings: change password */}
-                      <div className="mt-3 border-t pt-3">
-                        <h4 className="font-semibold">Settings</h4>
-                        <div className="mt-2">
-                          <input type="password" placeholder="New admin password" value={adminNewPass} onChange={e=>setAdminNewPass(e.target.value)} className="border p-2 rounded w-full"/>
-                          <button onClick={()=>{ if(!adminNewPass) return alert('enter'); setAdminPass(adminNewPass); setAdminNewPass(''); alert('Password changed'); }} className="mt-2 px-3 py-1 bg-yellow-500 rounded">Change Password</button>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* Admin full panel (separate large admin view) */}
-              {adminAuth && (
-                <div className="bg-white p-4 rounded shadow">
-                  <h3 className="font-bold">Full Admin Panel</h3>
-
-                  {/* Menu management */}
-                  <div className="mt-3">
-                    <h4 className="font-semibold">Manage Menu</h4>
-                    <div className="grid grid-cols-1 gap-2 mt-2">
-                      {menu.map(m => (
-                        <div key={m.id} className="flex justify-between items-center border p-2 rounded">
-                          <div className="flex items-center gap-3">
-                            <div className="w-12 h-12 bg-gray-100 rounded overflow-hidden">
-                              {m.image ? <img src={m.image} alt="" className="w-full h-full object-cover" /> : <div className="text-xs text-gray-400 p-2">No image</div>}
-                            </div>
-                            <div>
-                              <div className="font-medium">{m.name}</div>
-                              <div className="text-xs text-gray-600">₹{m.price} • Stock: {m.stock}</div>
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <button onClick={()=>editMenu(m)} className="px-2 py-1 border rounded text-sm">Edit</button>
-                            <button onClick={()=>deleteMenu(m.id)} className="px-2 py-1 border rounded text-sm text-red-600">Delete</button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Add/Edit form */}
-                    <div className="mt-3 border p-3 rounded">
-                      <h5 className="font-semibold">{editingId ? "Edit Item" : "Add Item"}</h5>
-                      <div className="grid grid-cols-1 gap-2 mt-2">
-                        <input placeholder="Name" value={menuForm.name} onChange={e=>setMenuForm(prev=>({...prev,name:e.target.value}))} className="border p-2 rounded"/>
-                        <input placeholder="Price" value={menuForm.price} onChange={e=>setMenuForm(prev=>({...prev,price:e.target.value}))} className="border p-2 rounded"/>
-                        <input placeholder="Stock" value={menuForm.stock} onChange={e=>setMenuForm(prev=>({...prev,stock:e.target.value}))} className="border p-2 rounded"/>
-                        <input placeholder="Description" value={menuForm.desc} onChange={e=>setMenuForm(prev=>({...prev,desc:e.target.value}))} className="border p-2 rounded"/>
-                        <input ref={fileRef} type="file" accept="image/*" onChange={(e)=> {
-                          const f = e.target.files && e.target.files[0];
-                          if(!f) return;
-                          const reader = new FileReader();
-                          reader.onload = (ev) => setMenuForm(prev => ({ ...prev, image: ev.target.result }));
-                          reader.readAsDataURL(f);
-                        }} className="border p-2 rounded"/>
-                        <div className="flex gap-2">
-                          <button onClick={saveMenuItem} className="px-3 py-1 bg-green-600 text-white rounded">{editingId ? "Save" : "Add"}</button>
-                          {editingId && <button onClick={()=>{ setEditingId(null); setMenuForm({ name: "", price: "", desc: "", image: "", stock: "" }); if(fileRef.current) fileRef.current.value = null; }} className="px-3 py-1 border rounded">Cancel</button>}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Orders full management */}
-                  <div className="mt-4">
-                    <h4 className="font-semibold">Orders Management</h4>
-                    <div className="mt-2 space-y-2 max-h-64 overflow-auto">
-                      {orders.length === 0 && <div className="text-sm text-gray-500">No orders yet</div>}
-                      {orders.map(o => (
-                        <div key={o.id} className="border p-2 rounded bg-gray-50">
-                          <div className="flex justify-between">
-                            <div><strong>{o.id}</strong> • {o.student}</div>
-                            <div className="text-sm">{o.paymentMethod.toUpperCase()}</div>
-                          </div>
-                          <div className="text-xs mt-1">Items: {o.items.map(i => i.name + " x" + i.qty).join(", ")}</div>
-                          <div className="text-xs">Total: ₹{o.total}</div>
-                          <div className="text-xs">Status: {o.served ? "Served" : o.approved ? "Approved" : (o.paymentMethod==='cash' ? "Pending (cash)" : "Paid/Online")}</div>
-                          <div className="mt-2 flex gap-2">
-                            {!o.approved && o.paymentMethod === 'cash' && <button onClick={()=>approveOrder(o.id)} className="px-2 py-1 bg-green-600 text-white rounded text-sm">Approve</button>}
-                            { (o.approved || o.paymentMethod==='online') && !o.served && <button onClick={()=>markServedByCode(o.pickupCode)} className="px-2 py-1 bg-blue-600 text-white rounded text-sm">Mark Served</button>}
-                            <button onClick={()=> {
-                              // open QR in new small window
-                              const w = window.open("", "_blank", "width=260,height=320");
-                              if (!w) return alert("Popup blocked");
-                              w.document.write("<div id='q'></div><p style='font-family:sans-serif'>Code: "+(o.pickupCode||"n/a")+"</p>");
-                              const d = w.document.getElementById("q");
-                              new QRCode(d, { text: o.pickupCode || "NO_CODE", width: 200, height: 200 });
-                            }} className="px-2 py-1 border rounded text-sm">Open QR</button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="mt-3">
-                      <button onClick={()=>setScannerOpen(true)} className="px-3 py-1 bg-purple-600 text-white rounded">Open Camera Scanner</button>
-                      {scannerOpen && (
-                        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center">
-                          <div className="bg-white p-4 rounded qr-scanner-modal">
-                            <div id="qr-reader" style={{ width: "100%" }}></div>
-                            <div className="mt-2 flex gap-2">
-                              <button onClick={()=>setScannerOpen(false)} className="px-3 py-1 bg-red-600 text-white rounded">Close</button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* FOOTER */}
-        <div className="mt-8 text-xs text-gray-600">This project is made by black box</div>
-      </div>
-    );
-  }
-
-  // ===== Render App =====
-  ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
   </script>
 </body>
 </html>

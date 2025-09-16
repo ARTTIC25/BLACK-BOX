@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Canteen Preorder App</title>
+  <title>Meal Mate App</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -29,12 +29,13 @@
     const LS_MENU = "canteen_menu_v1";
     const LS_ORDERS = "canteen_orders_v1";
     const LS_ADMIN_PASS = "canteen_admin_pass_v1";
-
+ //menu
     const DEFAULT_MENU = [
-      { id: "m1", name: "Veg Thali", price: 60, desc: "Rice, sabzi, dal, chapati", image: "", stock: 10 },
-      { id: "m2", name: "Chicken Biryani", price: 120, desc: "Spiced rice with chicken", image: "", stock: 8 },
-      { id: "m3", name: "Veg Sandwich", price: 40, desc: "Veggie sandwich with chutney", image: "", stock: 15 },
+      { id: "m1", name: "Veg Fried Rice ", price: 60, desc: "Rice,Veggies", image: "", stock: 10 },
+      { id: "m2", name: "Veg Biryani", price: 120, desc: "Spiced rice with chicken", image: "", stock: 8 },
+      { id: "m3", name: "Porotta", price: 12, desc: "Soft and Crispy", image: "", stock: 15 },
       { id: "m4", name: "Coffee", price: 15, desc: "Hot filter coffee", image: "", stock: 25 }
+      
     ];
 
     function uid(prefix = "") { return prefix + Math.random().toString(36).slice(2, 9); }
@@ -585,7 +586,7 @@
           <div className="max-w-6xl mx-auto font-sans">
             <header className="flex items-center justify-between mb-6 flex-wrap">
               <div>
-                <h1 className="text-3xl font-extrabold text-orange-700">CANTEEN PREORDER</h1>
+                <h1 className="text-3xl font-extrabold text-orange-700">MEAL MATE</h1>
                 <div className="text-sm text-gray-600">Developed by Team Black Box</div>
               </div>
               <div className="flex items-center gap-3 text-sm flex-shrink-0 mt-2 md:mt-0">

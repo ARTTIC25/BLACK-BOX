@@ -29,7 +29,8 @@
     const LS_MENU = "canteen_menu_v1";
     const LS_ORDERS = "canteen_orders_v1";
     const LS_ADMIN_PASS = "canteen_admin_pass_v1";
- //menu
+    const LS_PENDING_ORDER = "canteen_pending_online_order";
+
     const DEFAULT_MENU = [
       { id: "m1", name: "Veg Fried Rice ", price: 60, desc: "Rice,Veggies", image: "", stock: 10 },
       { id: "m2", name: "Veg Biryani", price: 120, desc: "Spiced rice with chicken", image: "", stock: 8 },
@@ -377,6 +378,8 @@
         message: ''
       });
 
+      const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
       // Persist data to localStorage
       useEffect(() => { localStorage.setItem(LS_MENU, JSON.stringify(menu)); }, [menu]);
       useEffect(() => { localStorage.setItem(LS_ORDERS, JSON.stringify(orders)); }, [orders]);
@@ -405,6 +408,47 @@
           }
         });
       }, [orders]);
+
+      // NEW: Handle redirection from payment page
+      useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const paymentStatus = urlParams.get('payment_status');
+        const pickupCode = urlParams.get('code');
+        const pendingOrder = JSON.parse(localStorage.getItem(LS_PENDING_ORDER));
+
+        if (paymentStatus === 'success' && pickupCode && pendingOrder) {
+          // Finalize the online order
+          setMenu(prev => prev.map(m => {
+            const ordered = pendingOrder.items.find(c => c.id === m.id);
+            return ordered ? { ...m, stock: m.stock - ordered.qty } : m;
+          }));
+
+          const newOrder = {
+            id: pendingOrder.id,
+            student: pendingOrder.student,
+            items: pendingOrder.items,
+            total: pendingOrder.total,
+            paymentMethod: "online",
+            paid: true,
+            approved: true,
+            pickupCode: pickupCode,
+            served: false,
+            createdAt: pendingOrder.createdAt
+          };
+          setOrders(prev => [newOrder, ...prev]);
+          setCart([]);
+          setStudentName(pendingOrder.student);
+          setMessageModal({ isOpen: true, title: 'Order Placed', message: `Order placed successfully. Your pickup code is: ${pickupCode}` });
+          window.location.hash = "#/orders";
+        }
+
+        // Clean up URL and localStorage
+        if (paymentStatus) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+          localStorage.removeItem(LS_PENDING_ORDER);
+        }
+      }, []);
+
 
       // Helper: find menu item
       function findMenuItem(id) { return menu.find(m => m.id === id); }
@@ -444,16 +488,13 @@
         const total = cartTotal();
 
         if (paymentMethod === "online") {
-          setMenu(prev => prev.map(m => {
-            const ordered = cart.find(c => c.id === m.id);
-            return ordered ? { ...m, stock: m.stock - ordered.qty } : m;
-          }));
           const pickupCode = generatePickupCode();
-          const order = { id, student: studentName, items: cart, total, paymentMethod: "online", paid: true, approved: true, pickupCode, served: false, createdAt };
-          setOrders(prev => [order, ...prev]);
-          setCart([]);
-          setMessageModal({ isOpen: true, title: 'Order Placed', message: `Order placed (online). Your pickup code is: ${pickupCode}` });
-          window.location.hash = "#/orders";
+          const pendingOrder = { id, student: studentName, items: cart, total, createdAt, pickupCode };
+          localStorage.setItem(LS_PENDING_ORDER, JSON.stringify(pendingOrder));
+          setIsProcessingPayment(true);
+          setTimeout(() => {
+            window.location.href = `payment.html?amount=${total}&code=${pickupCode}`;
+          }, 3000); // 3-second delay for the animation
         } else {
           const order = { id, student: studentName, items: cart, total, paymentMethod: "cash", paid: false, approved: false, pickupCode: null, served: false, createdAt };
           setOrders(prev => [order, ...prev]);
@@ -624,11 +665,26 @@
               <div id="qr-reader" style={{ width: "100%" }}></div>
             </Modal>
           )}
+
+          {isProcessingPayment && (
+            <Modal title="Processing Payment" onClose={() => {}}>
+              <div className="flex flex-col items-center justify-center">
+                <svg className="animate-spin h-10 w-10 text-orange-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p className="mt-4 text-center text-lg font-semibold text-gray-700">Simulating payment gateway...</p>
+                <p className="text-sm text-gray-500 mt-1">Please wait, do not close this window.</p>
+              </div>
+            </Modal>
+          )}
+
         </div>
       );
     }
 
     ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+    
   </script>
 </body>
 </html>

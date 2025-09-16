@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BLACK BOX SECURITY</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Custom animation for the progress bar */
+    @keyframes progress-fill {
+      from { width: 0%; }
+      to { width: 100%; }
+    }
+    .progress-bar-fill {
+      animation: progress-fill 2s ease-in-out forwards;
+    }
+    .spinner-border {
+      display: inline-block;
+      width: 2rem;
+      height: 2rem;
+      vertical-align: -0.125em;
+      border: 0.25em solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      -webkit-animation: .75s linear infinite spinner-border;
+      animation: .75s linear infinite spinner-border;
+    }
+    @keyframes spinner-border {
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+  </style>
+</head>
+<body class="bg-blue-600 font-sans flex items-center justify-center min-h-screen">
+
+  <div class="bg-white p-8 md:p-10 rounded-3xl shadow-2xl w-full max-w-sm mx-auto transform transition-all duration-300">
+    <div class="flex items-center justify-between mb-8">
+      <span class="text-white bg-blue-600 rounded-full p-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 1.343-3 3v5c0 1.657 1.343 3 3 3s3-1.343 3-3v-5c0-1.657-1.343-3-3-3z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 11V3"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M7 16l-3.37 3.37a2.5 2.5 0 003.536 3.536L12 19"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l3.37 3.37a2.5 2.5 0 00-3.536 3.536L12 19"/>
+        </svg>
+      </span>
+      <span class="text-xl font-bold text-gray-800">BLACK BOX UPI</span>
+    </div>
+
+    <div class="text-center mb-6">
+      <p class="text-lg text-gray-500">Paying Meal Mate Canteen</p>
+      <p id="amountText" class="text-4xl font-extrabold text-blue-600 mt-2">₹0</p>
+    </div>
+
+    <div class="bg-gray-100 p-4 rounded-lg flex items-center justify-between text-sm text-gray-700">
+      <span>UPI ID: <span class="font-semibold">mealmatecanteen@upi</span></span>
+      <span class="text-xs text-gray-500">HDFC Bank ••••1234</span>
+    </div>
+    
+    <div id="processing" class="my-8 text-center flex flex-col items-center">
+      <div class="spinner-border text-blue-500"></div>
+      <p class="text-lg font-medium text-gray-600 mt-4">Processing payment...</p>
+      <div class="relative w-full h-1 bg-gray-200 rounded mt-4">
+        <div class="progress-bar-fill h-full bg-blue-500 rounded"></div>
+      </div>
+    </div>
+
+    <form id="paymentForm" class="space-y-4" style="display: none;">
+      <div>
+        <label for="otp" class="block text-sm font-medium text-gray-700 mb-1">Enter 6-digit UPI PIN</label>
+        <input id="otp" type="password" maxlength="6" placeholder="● ● ● ● ● ●"
+          class="w-full px-4 py-3 text-center text-lg tracking-widest border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition">
+      </div>
+      <button type="submit" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition">
+        Pay <span id="payBtnAmount">₹0</span>
+      </button>
+    </form>
+
+    <div id="message" class="mt-8 text-center" style="display: none;">
+      <p id="messageText" class="font-semibold text-lg"></p>
+    </div>
+
+  </div>
+
+  <script>
+    let paymentCompleted = false;
+
+    // GET AMOUNT AND CODE FROM URL PARAMETERS
+    const urlParams = new URLSearchParams(window.location.search);
+    const amount = urlParams.get("amount") || 0;
+    const code = urlParams.get("code");
+    document.getElementById("amountText").innerText = `₹${amount}`;
+    document.getElementById("payBtnAmount").innerText = `₹${amount}`;
+
+    const form = document.getElementById("paymentForm");
+    const otpInput = document.getElementById("otp");
+    const message = document.getElementById("message");
+    const messageText = document.getElementById("messageText");
+    const processingDiv = document.getElementById("processing");
+
+    // SHOW FORM AFTER PROCESSING ANIMATION
+    setTimeout(() => {
+      processingDiv.style.display = "none";
+      form.style.display = "block";
+    }, 2500); // Wait 2.5 seconds for the progress bar animation
+
+    // DETECT IF USER CLOSES TAB OR GOES BACK
+    window.addEventListener("beforeunload", (e) => {
+      if (!paymentCompleted) {
+        alert("PAYMENT FAILED ❌ You closed the payment window before completing the payment.");
+      }
+    });
+
+    // ON FORM SUBMIT
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const otp = otpInput.value.trim();
+
+      form.style.display = "none";
+      message.style.display = "block";
+
+      if (/^\d{6}$/.test(otp)) {
+        paymentCompleted = true;
+        messageText.textContent = "PAYMENT SUCCESSFUL ✅";
+        messageText.className = "text-green-600";
+        setTimeout(() => {
+          // REDIRECT BACK TO MAIN PAGE WITH SUCCESS STATUS AND CODE
+          window.location.href = `index.html?payment_status=success&code=${code}`;
+        }, 2000);
+      } else {
+        messageText.textContent = "PAYMENT ERROR ❌ PLEASE ENTER A VALID 6-DIGIT PIN.";
+        messageText.className = "text-red-600";
+        setTimeout(() => {
+          message.style.display = "none";
+          form.style.display = "block";
+        }, 3000);
+      }
+    });
+  </script>
+</body>
+</html>
